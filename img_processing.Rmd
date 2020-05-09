@@ -1,0 +1,111 @@
+---
+title: "STOR565 Project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(magick)
+library(rsvg)
+library(tidyverse)
+```
+
+
+Create basic function to test how image looks after re-scaling.
+```{r}
+#test image quality
+convert_test <- function(img, res) {
+  img %>% 
+    image_convert(type = 'Bilevel') %>% 
+    image_scale(paste(res, 
+                      "x", 
+                      res, 
+                      "!",
+                      sep = "")) %>% 
+    plot()
+}
+```
+
+
+Testing convert_test function.
+```{r}
+#read image from file
+#change the address to local file lcation
+image_read("~/Downloads/STOR565/565_project/ardis_3/8/1.jpg") %>% 
+  #convert_to_row(res = 5)
+  convert_test(res = 20)
+```
+
+
+Function to convert image to single row given image object and resolution value.
+```{r}
+#parameters are img object (use image_read from 'magick')
+convert_to_row <- function(img, res) {
+  img %>% 
+    #re-scale image
+    image_scale(paste(res, "x", res, "!", sep = "")) %>% 
+    #convert to black and white
+    image_convert(type = 'Bilevel') %>% 
+    image_raster() %>% 
+    #change black to 0 and black to 1
+    mutate(col = ifelse(col == "#ffffffff", 1, 0)) %>%
+    #collapse 
+    pivot_wider(id_cols=c("x", "y"), 
+                names_from = c("x", "y"), 
+                values_from = "col") %>% 
+    return()
+}
+```
+
+
+Function to convert all 760 images of a given digit into a dataframe.
+```{r}
+#parameters are digit (0-9) and resolution (any positive integer)
+ardis_data <- function(digit, res) {
+  #create empty dataframe
+  img_df = as.data.frame(matrix(NA, 760, res^2))
+  #set names of columns
+  names(img_df) = names(
+    #use local image file location
+    image_read(paste("~/Downloads/STOR565/565_project/ardis_3/", 
+                   digit, 
+                   "/1.jpg", 
+                   sep = "")) %>%
+    convert_to_row(res))
+  #loop through all images stored locally and convert_to_row
+  #then, add to dataframe
+  for(i in 1:760) { 
+    img = image_read(paste("~/Downloads/STOR565/565_project/ardis_3/", 
+                           digit, 
+                           "/", 
+                           i, 
+                           ".jpg", 
+                           sep = "")) 
+    img_df[i,] = convert_to_row(img, res)
+  }
+  #create response column, y (actual digit)
+  img_df = img_df  %>%
+    mutate(y = digit)
+  return(img_df)
+}
+```
+
+
+Loop through all digits 0-9 and combine into a single dataframe, img_data. Change 'res' value to match desired resolution (12, 20, and 32 already created).
+```{r}
+#set resolution
+res = 20
+#first create dataframe of '0' digit
+#simplifies looping (no need to do i-1)
+img_data = ardis_data(0, res)
+for(i in 1:9) {
+  img_data = rbind(img_data, ardis_data(i, res))
+}
+```
+
+Write to local storage.
+```{r}
+readr::write_csv(img_data, 
+          path = "~/Downloads/STOR565/565_project/img_data_20.csv")
+```
+

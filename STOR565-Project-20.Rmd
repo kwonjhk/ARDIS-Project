@@ -1,0 +1,134 @@
+---
+title: "STOR565-Project-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(nnet)
+library(e1071)
+library(class)
+library(readr)
+library(randomForest)
+library(caret)
+library(ranger)
+
+#enable multi-core computing
+#only comptaible with OSX/Linux
+library(doMC)
+registerDoMC()
+
+#import data
+img <- 
+  read_csv("~/Downloads/STOR565/565_project/img_data_20.csv") %>%
+  mutate(y = as.factor(y))
+names(img) <- make.names(names(img))
+
+#create test set
+set.seed(1)
+test = sample(1:nrow(img), 600)
+```
+
+Would not recommend running code below since model training/grid search would take too long. Instead, download the 'img_20_models.RData' file and load into the environment directly.
+
+
+Same as in the .rmd for img_12, first created the multinomial logistic regression model. The performance is noticeably worse for img_20.
+```{r}
+# multinomial logistic regression model
+logmod = multinom(y~., data = img[-test,], MaxNWts = 20000, maxit = 1000)
+mean(predict(logmod, img[test,]) != img[test,]$y)
+```
+
+
+'caret' svm training of linear SVM. Test performance is slightly better than the linear SVM for img_12.
+```{r}
+#svm training with caret
+grid = expand.grid(C = 2^(-12:4))
+ctrl = trainControl(method='cv', number=5, savePred = TRUE)
+svmmod = train(y~., img[-test,], method = "svmLinear", 
+               trControl = ctrl, tuneGrid = grid)
+```
+
+```{r}
+#plot + test error
+ggplot() + 
+  geom_line(aes(x = log(svmmod$results[,1]), 
+                y = 1 - svmmod$results[,2])) + 
+  xlab("log(Cost)") + 
+  ylab("5-fold CV Error") + 
+  geom_vline(aes(xintercept = log(0.00390625)), linetype = "dotted",
+             colour = "red")
+
+mean(predict(svmmod, img[test,]) != img[test,]$y)
+```
+
+
+KNN tuning with 'caret'
+```{r}
+#knn training with caret
+grid = expand.grid(k = 1:100)
+ctrl = trainControl(method='cv', number=5, savePred = TRUE)
+knn.img = train(y~., img[-test,], method = "knn", 
+               trControl = ctrl, tuneGrid = grid)
+```
+
+```{r}
+#plot + test error
+ggplot() +
+  geom_line(aes(x = knn.img$results[,1], 
+                y = 1 - knn.img$results[,2])) + 
+  xlab("K") + 
+  ylab("5-fold CV Error")
+
+mean(as.vector(predict(knn.img, img[test,])) != img[test,"y"])
+```
+
+
+Random forest training with 'caret' using 'ranger' fitting algorithm, which was faster than 'rf' (from 'randomForest) and 'parRf' (parallel random forest algorithm).
+```{r}
+#random forest training with caret
+#set grid
+#grid values set the same way as in img_12 (look at .rmd for img_12 for specifics).
+grid = expand.grid(.mtry = seq(10, 100, 10),
+                   .splitrule = "gini", 
+                   .min.node.size = 1)
+#set control to 5-fold CV
+ctrl = trainControl(method="oob")
+rf.img = train(y~., img[-test,], method = "ranger", 
+               trControl = ctrl, tuneGrid = grid)
+```
+
+```{r}
+#random forest graph using oob error
+ggplot() + 
+  geom_line(aes(x = rf.img$results[,3], 
+                y = 1 - rf.img$results[,1])) + 
+  xlab("mtry") + ylab("Out-of-bag Error") + 
+  geom_vline(aes(xintercept = 60), linetype = "dotted", 
+             colour = "red")
+```
+
+```{r}
+#fit rf model with best mtry based on oob
+rf.img1 = ranger(y~., data = img[-test,], 
+             mtry = 60, splitrule = "gini", min.node.size = 1)
+```
+
+```{r}
+#test error of best rf model
+mean(predict(rf.img1, img[test,])[["predictions"]] != img[test,]$y)
+```
+
+Bagging model with 'ranger'
+```{r}
+#bagging
+bag.img = ranger(y~., data = img[-test,], 
+             mtry = 400, splitrule = "gini", min.node.size = 1)
+```
+
+```{r}
+#test error
+mean(predict(bag.img, img[test,])[["predictions"]] != img[test,]$y)
+```
+
